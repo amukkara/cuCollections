@@ -15,14 +15,15 @@
  * limitations under the License.
  */
 
+#include <cuco/bit_vector.cuh>
+#include <cuco/cuda_stream_ref.hpp>
+
 #include <thrust/device_vector.h>
 
 #include <cassert>
 #include <iostream>
 #include <queue>
 #include <vector>
-
-#include <cuco/bit_vector.cuh>
 
 namespace cuco {
 namespace experimental {
@@ -39,7 +40,8 @@ class trie {
   void lookup(KeyIt keys_begin,
               KeyIt keys_end,
               OffsetIt offsets_begin,
-              OutputIt outputs_begin) const;
+              OutputIt outputs_begin,
+              cuda_stream_ref stream = {}) const;
 
   uint64_t n_keys() const { return n_keys_; }
   uint64_t memory_footprint() const { return footprint_; }

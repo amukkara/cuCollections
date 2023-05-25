@@ -130,45 +130,51 @@ template <typename KeyIt, typename OffsetIt, typename OutputIt>
 void trie<T>::lookup(KeyIt keys_begin,
                      KeyIt keys_end,
                      OffsetIt offsets_begin,
-                     OutputIt outputs_begin) const
+                     OutputIt outputs_begin,
+                     cuda_stream_ref stream) const
 {
   auto const num_keys = cuco::detail::distance(keys_begin, keys_end);
   if (num_keys == 0) { return; }
 
-  int block_size = 256;
-  int num_blocks = (num_keys - 1) / block_size + 1;
+  auto const grid_size =
+    (num_keys + detail::CUCO_DEFAULT_STRIDE * detail::CUCO_DEFAULT_BLOCK_SIZE - 1) /
+    (detail::CUCO_DEFAULT_STRIDE * detail::CUCO_DEFAULT_BLOCK_SIZE);
 
-  trie_lookup_kernel<<<num_blocks, block_size>>>(
+  trie_lookup_kernel<<<grid_size, detail::CUCO_DEFAULT_BLOCK_SIZE, 0, stream>>>(
     device_impl_, keys_begin, offsets_begin, outputs_begin, num_keys);
 }
 
 template <typename T, typename KeyIt, typename OffsetIt, typename OutputIt>
-__global__ __launch_bounds__(256, 1) void trie_lookup_kernel(
+__global__ void trie_lookup_kernel(
   const trie<T>* trie, KeyIt keys, OffsetIt offsets, OutputIt outputs, uint64_t num_keys)
 {
-  auto const key_id = blockDim.x * blockIdx.x + threadIdx.x;
-  if (key_id >= num_keys) { return; }
+  uint32_t const loop_stride = gridDim.x * blockDim.x;
+  uint32_t key_id            = blockDim.x * blockIdx.x + threadIdx.x;
 
-  const uint64_t length = offsets[key_id + 1] - offsets[key_id];
-  const auto query      = keys + offsets[key_id];
+  while (key_id < num_keys) {
+    const uint64_t length = offsets[key_id + 1] - offsets[key_id];
+    const auto query      = keys + offsets[key_id];
 
-  uint32_t node_id = 0;
-  for (uint32_t cur_depth = 1; cur_depth <= length; cur_depth++) {
-    if (!binary_search_labels_array(trie, (T) * (query + cur_depth - 1), node_id, cur_depth)) {
+    uint32_t node_id = 0;
+    for (uint32_t cur_depth = 1; cur_depth <= length; cur_depth++) {
+      if (!binary_search_labels_array(trie, (T) * (query + cur_depth - 1), node_id, cur_depth)) {
+        outputs[key_id] = -1lu;
+        return;
+      }
+    }
+
+    uint64_t leaf_level_id = length;
+    if (!trie->d_outs_refs_ptr_[leaf_level_id].get(node_id)) {
       outputs[key_id] = -1lu;
       return;
     }
-  }
 
-  uint64_t leaf_level_id = length;
-  if (!trie->d_outs_refs_ptr_[leaf_level_id].get(node_id)) {
-    outputs[key_id] = -1lu;
-    return;
-  }
+    auto offset     = trie->d_levels_ptr_[leaf_level_id].offset;
+    auto rank       = trie->d_outs_refs_ptr_[leaf_level_id].rank(node_id);
+    outputs[key_id] = offset + rank;
 
-  auto offset     = trie->d_levels_ptr_[leaf_level_id].offset;
-  auto rank       = trie->d_outs_refs_ptr_[leaf_level_id].rank(node_id);
-  outputs[key_id] = offset + rank;
+    key_id += loop_stride;
+  }
 }
 
 template <typename BitVectorRef>

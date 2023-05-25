@@ -33,7 +33,7 @@ void generate_keys(thrust::host_vector<KeyType>& keys,
                    size_t max_key_length)
 {
   for (size_t key_id = 0; key_id < num_keys; key_id++) {
-    size_t cur_key_length = 1 + (std::rand() % max_key_length);
+    size_t cur_key_length = max_key_length;  // 1 + (std::rand() % max_key_length);
     offsets.push_back(cur_key_length);
     for (size_t pos = 0; pos < cur_key_length; pos++) {
       keys.push_back(1 + (std::rand() % max_key_value));
@@ -50,11 +50,11 @@ TEST_CASE("Lookup test", "")
   using KeyType = int;
   cuco::experimental::trie<KeyType> trie;
 
-  std::size_t num_keys = 10;
+  std::size_t num_keys = 1000;
   thrust::host_vector<KeyType> keys;
   thrust::host_vector<uint64_t> offsets;
 
-  generate_keys(keys, offsets, num_keys, 1000, 3);
+  generate_keys(keys, offsets, num_keys, 1000, 8);
 
   {
     std::vector<std::vector<KeyType>> all_keys;
