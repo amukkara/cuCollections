@@ -125,20 +125,6 @@ void trie<T>::build()
   CUCO_CUDA_TRY(cudaMemcpy(device_impl_, this, sizeof(trie<T>), cudaMemcpyHostToDevice));
 }
 
-/*
-template <typename T>
-void trie<T>::lookup(const T* keys,
-                     const uint64_t* offsets,
-                     uint64_t* outputs,
-                     uint64_t num_keys) const
-{
-  int block_size = 256;
-  int num_blocks = (num_keys - 1) / block_size + 1;
-
-  trie_lookup_kernel<<<num_blocks, block_size>>>(device_impl_, keys, offsets, outputs, num_keys);
-}
-*/
-
 template <typename T>
 template <typename KeyIt, typename OffsetIt, typename OutputIt>
 void trie<T>::lookup(KeyIt keys_begin,
