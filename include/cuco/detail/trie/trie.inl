@@ -116,6 +116,7 @@ void trie<T>::build()
 
   num_levels_ = levels_.size();
 
+  // FIXME Use thrust vectors for automatic memory management
   CUCO_CUDA_TRY(cudaMalloc(&d_levels_ptr_, sizeof(Level) * num_levels_));
   CUCO_CUDA_TRY(
     cudaMemcpy(d_levels_ptr_, &levels_[0], sizeof(Level) * num_levels_, cudaMemcpyHostToDevice));
@@ -124,45 +125,64 @@ void trie<T>::build()
   CUCO_CUDA_TRY(cudaMemcpy(device_impl_, this, sizeof(trie<T>), cudaMemcpyHostToDevice));
 }
 
+/*
 template <typename T>
-void trie<T>::lookup(const T* queries,
+void trie<T>::lookup(const T* keys,
                      const uint64_t* offsets,
-                     uint64_t* ids,
-                     uint64_t num_queries) const
+                     uint64_t* outputs,
+                     uint64_t num_keys) const
 {
   int block_size = 256;
-  int num_blocks = (num_queries - 1) / block_size + 1;
+  int num_blocks = (num_keys - 1) / block_size + 1;
 
-  trie_lookup_kernel<<<num_blocks, block_size>>>(device_impl_, queries, offsets, ids, num_queries);
+  trie_lookup_kernel<<<num_blocks, block_size>>>(device_impl_, keys, offsets, outputs, num_keys);
 }
+*/
 
 template <typename T>
+template <typename KeyIt, typename OffsetIt, typename OutputIt>
+void trie<T>::lookup(KeyIt keys_begin,
+                     KeyIt keys_end,
+                     OffsetIt offsets_begin,
+                     OutputIt outputs_begin) const
+{
+  auto const num_keys = cuco::detail::distance(keys_begin, keys_end);
+  if (num_keys == 0) { return; }
+
+  int block_size = 256;
+  int num_blocks = (num_keys - 1) / block_size + 1;
+
+  trie_lookup_kernel<<<num_blocks, block_size>>>(
+    device_impl_, keys_begin, offsets_begin, outputs_begin, num_keys);
+}
+
+template <typename T, typename KeyIt, typename OffsetIt, typename OutputIt>
 __global__ __launch_bounds__(256, 1) void trie_lookup_kernel(
-  const trie<T>* trie, const T* keys, const uint64_t* offsets, uint64_t* ids, uint64_t num_queries)
+  const trie<T>* trie, KeyIt keys, OffsetIt offsets, OutputIt outputs, uint64_t num_keys)
 {
   auto const key_id = blockDim.x * blockIdx.x + threadIdx.x;
-  if (key_id >= num_queries) { return; }
+  if (key_id >= num_keys) { return; }
 
   const uint64_t length = offsets[key_id + 1] - offsets[key_id];
-  const T* query        = keys + offsets[key_id];
+  const auto query      = keys + offsets[key_id];
 
   uint32_t node_id = 0;
   for (uint32_t cur_depth = 1; cur_depth <= length; cur_depth++) {
-    if (!binary_search_labels_array(trie, query[cur_depth - 1], node_id, cur_depth)) {
-      ids[key_id] = -1lu;
+    if (!binary_search_labels_array(trie, (T) * (query + cur_depth - 1), node_id, cur_depth)) {
+      outputs[key_id] = -1lu;
       return;
     }
   }
 
   uint64_t leaf_level_id = length;
   if (!trie->d_outs_refs_ptr_[leaf_level_id].get(node_id)) {
-    ids[key_id] = -1lu;
+    outputs[key_id] = -1lu;
     return;
   }
 
-  auto offset = trie->d_levels_ptr_[leaf_level_id].offset;
-  auto rank   = trie->d_outs_refs_ptr_[leaf_level_id].rank(node_id);
-  ids[key_id] = offset + rank;
+  auto offset     = trie->d_levels_ptr_[leaf_level_id].offset;
+  auto rank       = trie->d_outs_refs_ptr_[leaf_level_id].rank(node_id);
+  outputs[key_id] = offset + rank;
 }
 
 template <typename BitVectorRef>

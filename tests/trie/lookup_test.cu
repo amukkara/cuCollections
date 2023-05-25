@@ -21,52 +21,43 @@
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
-#include <thrust/sequence.h>
+#include <thrust/scan.h>
 
 #include <catch2/catch_test_macros.hpp>
-
-struct valid_key {
-  __host__ __device__ bool operator()(uint64_t x) const { return x != -1lu; }
-};
 
 TEST_CASE("Lookup test", "")
 {
   using KeyType = int;
   cuco::experimental::trie<KeyType> trie;
 
-  std::size_t num_keys                      = 3;
-  thrust::host_vector<KeyType> flatten_keys = std::vector<KeyType>{1, 2, 3, 1, 2, 4, 1, 4, 2};
-  thrust::host_vector<uint64_t> key_offsets = std::vector<KeyType>{0, 3, 6, 9};
+  std::size_t num_keys              = 3;
+  thrust::host_vector<KeyType> keys = std::vector<KeyType>{1, 2, 3, 1, 2, 4, 1, 4, 2};
+
+  // Last length is 0 to simplify subsequent scan
+  thrust::host_vector<uint64_t> lengths = std::vector<uint64_t>{3, 3, 3, 0};
+  thrust::host_vector<uint64_t> offsets = lengths;
+  thrust::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin());  // in-place scan
 
   for (size_t key_id = 0; key_id < num_keys; key_id++) {
     std::vector<KeyType> cur_key;
-    for (size_t pos = key_offsets[key_id]; pos < key_offsets[key_id + 1]; pos++) {
-      cur_key.push_back(flatten_keys[pos]);
+    for (size_t pos = offsets[key_id]; pos < offsets[key_id + 1]; pos++) {
+      cur_key.push_back(keys[pos]);
     }
     trie.add(cur_key);
   }
-
   trie.build();
 
-  thrust::device_vector<uint64_t> lookup_result(num_keys, -1lu);
   {
-    thrust::device_vector<KeyType> device_keys     = flatten_keys;
-    thrust::device_vector<uint64_t> device_offsets = key_offsets;
+    thrust::device_vector<uint64_t> lookup_result(num_keys, -1lu);
+    thrust::device_vector<KeyType> device_keys     = keys;
+    thrust::device_vector<uint64_t> device_offsets = offsets;
 
-    trie.lookup(thrust::raw_pointer_cast(device_keys.data()),
-                thrust::raw_pointer_cast(device_offsets.data()),
-                thrust::raw_pointer_cast(lookup_result.data()),
-                num_keys);
+    trie.lookup(
+      device_keys.begin(), device_keys.end(), device_offsets.begin(), lookup_result.begin());
 
     thrust::host_vector<uint64_t> host_lookup_result = lookup_result;
     for (size_t key_id = 0; key_id < num_keys; key_id++) {
       REQUIRE(host_lookup_result[key_id] == key_id);
     }
   }
-
-  thrust::transform(
-    thrust::device, lookup_result.begin(), lookup_result.end(), lookup_result.begin(), valid_key());
-  size_t num_matches =
-    thrust::reduce(thrust::device, lookup_result.begin(), lookup_result.end(), 0);
-  REQUIRE(num_matches == num_keys);
 }

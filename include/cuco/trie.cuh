@@ -35,7 +35,11 @@ class trie {
   void add(const std::vector<T>& key);
   void build();
 
-  void lookup(const T* queries, const uint64_t* offsets, uint64_t* ids, uint64_t num_queries) const;
+  template <typename KeyIt, typename OffsetIt, typename OutputIt>
+  void lookup(KeyIt keys_begin,
+              KeyIt keys_end,
+              OffsetIt offsets_begin,
+              OutputIt outputs_begin) const;
 
   uint64_t n_keys() const { return n_keys_; }
   uint64_t memory_footprint() const { return footprint_; }
