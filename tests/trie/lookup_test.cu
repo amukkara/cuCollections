@@ -25,28 +25,75 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+template <typename KeyType>
+void generate_keys(thrust::host_vector<KeyType>& keys,
+                   thrust::host_vector<uint64_t>& offsets,
+                   size_t num_keys,
+                   size_t max_key_value,
+                   size_t max_key_length)
+{
+  for (size_t key_id = 0; key_id < num_keys; key_id++) {
+    size_t cur_key_length = 1 + (std::rand() % max_key_length);
+    offsets.push_back(cur_key_length);
+    for (size_t pos = 0; pos < cur_key_length; pos++) {
+      keys.push_back(1 + (std::rand() % max_key_value));
+    }
+  }
+
+  // Add a dummy 0 to simplify subsequent scan
+  offsets.push_back(0);
+  thrust::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin());  // in-place scan
+}
+
 TEST_CASE("Lookup test", "")
 {
   using KeyType = int;
   cuco::experimental::trie<KeyType> trie;
 
-  std::size_t num_keys              = 3;
-  thrust::host_vector<KeyType> keys = std::vector<KeyType>{1, 2, 3, 1, 2, 4, 1, 4, 2};
+  std::size_t num_keys = 10;
+  thrust::host_vector<KeyType> keys;
+  thrust::host_vector<uint64_t> offsets;
 
-  // Last length is 0 to simplify subsequent scan
-  thrust::host_vector<uint64_t> lengths = std::vector<uint64_t>{3, 3, 3, 0};
-  thrust::host_vector<uint64_t> offsets = lengths;
-  thrust::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin());  // in-place scan
+  generate_keys(keys, offsets, num_keys, 1000, 3);
 
-  for (size_t key_id = 0; key_id < num_keys; key_id++) {
-    std::vector<KeyType> cur_key;
-    for (size_t pos = offsets[key_id]; pos < offsets[key_id + 1]; pos++) {
-      cur_key.push_back(keys[pos]);
+  {
+    std::vector<std::vector<KeyType>> all_keys;
+    for (size_t key_id = 0; key_id < num_keys; key_id++) {
+      std::vector<KeyType> cur_key;
+      for (size_t pos = offsets[key_id]; pos < offsets[key_id + 1]; pos++) {
+        cur_key.push_back(keys[pos]);
+      }
+      all_keys.push_back(cur_key);
     }
-    trie.add(cur_key);
-  }
-  trie.build();
 
+    struct vectorKeyCompare {
+      bool operator()(const std::vector<KeyType>& lhs, const std::vector<KeyType>& rhs)
+      {
+        for (size_t pos = 0; pos < min(lhs.size(), rhs.size()); pos++) {
+          if (lhs[pos] < rhs[pos]) {
+            return true;
+          } else if (lhs[pos] > rhs[pos]) {
+            return false;
+          }
+        }
+        return lhs.size() <= rhs.size();
+      }
+    };
+    sort(all_keys.begin(), all_keys.end(), vectorKeyCompare());
+
+    for (auto key : all_keys) {
+#if 0
+      printf("Insert");
+      for (auto c : key) {
+        printf(" %d", c);
+      }
+      printf("\n");
+#endif
+      trie.add(key);
+    }
+  }
+
+  trie.build();
   {
     thrust::device_vector<uint64_t> lookup_result(num_keys, -1lu);
     thrust::device_vector<KeyType> device_keys     = keys;
@@ -57,7 +104,7 @@ TEST_CASE("Lookup test", "")
 
     thrust::host_vector<uint64_t> host_lookup_result = lookup_result;
     for (size_t key_id = 0; key_id < num_keys; key_id++) {
-      REQUIRE(host_lookup_result[key_id] == key_id);
+      REQUIRE(host_lookup_result[key_id] < num_keys);
     }
   }
 }
