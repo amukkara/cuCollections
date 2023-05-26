@@ -117,9 +117,9 @@ void trie<T>::build()
   num_levels_ = levels_.size();
 
   // FIXME Use thrust vectors for automatic memory management
-  CUCO_CUDA_TRY(cudaMalloc(&d_levels_ptr_, sizeof(Level) * num_levels_));
+  CUCO_CUDA_TRY(cudaMalloc(&d_levels_ptr_, sizeof(level) * num_levels_));
   CUCO_CUDA_TRY(
-    cudaMemcpy(d_levels_ptr_, &levels_[0], sizeof(Level) * num_levels_, cudaMemcpyHostToDevice));
+    cudaMemcpy(d_levels_ptr_, &levels_[0], sizeof(level) * num_levels_, cudaMemcpyHostToDevice));
 
   CUCO_CUDA_TRY(cudaMalloc(&device_impl_, sizeof(trie<T>)));
   CUCO_CUDA_TRY(cudaMemcpy(device_impl_, this, sizeof(trie<T>), cudaMemcpyHostToDevice));
@@ -214,6 +214,21 @@ __device__ bool binary_search_labels_array(const trie<T>* trie,
     }
   }
   return begin < end;
+}
+
+template <typename T>
+trie<T>::level::level()
+  : louds(cuco::experimental::extent<std::size_t>{1000}),
+    outs(cuco::experimental::extent<std::size_t>{1000}),
+    d_labels_ptr(nullptr),
+    offset(0)
+{
+}
+
+template <typename T>
+uint64_t trie<T>::level::memory_footprint() const
+{
+  return louds.size() + outs.size() + sizeof(T) * labels.size();
 }
 
 }  // namespace experimental

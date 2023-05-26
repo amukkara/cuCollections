@@ -46,29 +46,21 @@ class trie {
   uint64_t n_keys() const { return n_keys_; }
   uint64_t memory_footprint() const { return footprint_; }
 
-  struct Level {
+  struct level {
+    level();
+    uint64_t memory_footprint() const;
+
     bit_vector<> louds;
     bit_vector<> outs;
+
     std::vector<T> labels;
     thrust::device_vector<T> d_labels;
     T* d_labels_ptr;
-    uint64_t offset;
 
-    Level()
-      : louds(cuco::experimental::extent<std::size_t>{1000}),
-        outs(cuco::experimental::extent<std::size_t>{1000}),
-        labels(),
-        offset(0)
-    {
-    }
-    uint64_t memory_footprint() const
-    {
-      return louds.size() + outs.size() + sizeof(T) * labels.size();
-    }
+    uint64_t offset;
   };
 
- public:
-  Level* d_levels_ptr_;
+  level* d_levels_ptr_;
 
   static constexpr auto cg_size     = 1;
   static constexpr auto window_size = 1;
@@ -86,7 +78,7 @@ class trie {
 
  private:
   uint64_t num_levels_;
-  std::vector<Level> levels_;
+  std::vector<level> levels_;
 
   uint64_t n_keys_;
   uint64_t n_nodes_;
