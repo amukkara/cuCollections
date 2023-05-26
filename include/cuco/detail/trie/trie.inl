@@ -217,11 +217,7 @@ __device__ bool binary_search_labels_array(const trie<T>* trie,
 }
 
 template <typename T>
-trie<T>::level::level()
-  : louds(cuco::experimental::extent<std::size_t>{1000}),
-    outs(cuco::experimental::extent<std::size_t>{1000}),
-    d_labels_ptr(nullptr),
-    offset(0)
+trie<T>::level::level() : louds(), outs(), d_labels_ptr(nullptr), offset(0)
 {
 }
 
