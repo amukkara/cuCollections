@@ -38,8 +38,8 @@ class trie {
 
   template <typename KeyIt, typename OffsetIt, typename OutputIt>
   void lookup(KeyIt keys_begin,
-              KeyIt keys_end,
               OffsetIt offsets_begin,
+              OffsetIt offsets_end,
               OutputIt outputs_begin,
               cuda_stream_ref stream = {}) const;
 

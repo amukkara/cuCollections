@@ -33,7 +33,7 @@ void generate_keys(thrust::host_vector<KeyType>& keys,
                    size_t max_key_length)
 {
   for (size_t key_id = 0; key_id < num_keys; key_id++) {
-    size_t cur_key_length = max_key_length;  // 1 + (std::rand() % max_key_length);
+    size_t cur_key_length = 1 + (std::rand() % max_key_length);
     offsets.push_back(cur_key_length);
     for (size_t pos = 0; pos < cur_key_length; pos++) {
       keys.push_back(1 + (std::rand() % max_key_value));
@@ -50,11 +50,11 @@ TEST_CASE("Lookup test", "")
   using KeyType = int;
   cuco::experimental::trie<KeyType> trie;
 
-  std::size_t num_keys = 1000;
+  std::size_t num_keys = 64 * 1024;
   thrust::host_vector<KeyType> keys;
   thrust::host_vector<uint64_t> offsets;
 
-  generate_keys(keys, offsets, num_keys, 1000, 8);
+  generate_keys(keys, offsets, num_keys, 1000, 32);
 
   {
     std::vector<std::vector<KeyType>> all_keys;
@@ -82,25 +82,19 @@ TEST_CASE("Lookup test", "")
     sort(all_keys.begin(), all_keys.end(), vectorKeyCompare());
 
     for (auto key : all_keys) {
-#if 0
-      printf("Insert");
-      for (auto c : key) {
-        printf(" %d", c);
-      }
-      printf("\n");
-#endif
       trie.add(key);
     }
   }
 
   trie.build();
+
   {
     thrust::device_vector<uint64_t> lookup_result(num_keys, -1lu);
     thrust::device_vector<KeyType> device_keys     = keys;
     thrust::device_vector<uint64_t> device_offsets = offsets;
 
     trie.lookup(
-      device_keys.begin(), device_keys.end(), device_offsets.begin(), lookup_result.begin());
+      device_keys.begin(), device_offsets.begin(), device_offsets.end(), lookup_result.begin());
 
     thrust::host_vector<uint64_t> host_lookup_result = lookup_result;
     for (size_t key_id = 0; key_id < num_keys; key_id++) {

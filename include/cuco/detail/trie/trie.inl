@@ -128,17 +128,16 @@ void trie<T>::build()
 template <typename T>
 template <typename KeyIt, typename OffsetIt, typename OutputIt>
 void trie<T>::lookup(KeyIt keys_begin,
-                     KeyIt keys_end,
                      OffsetIt offsets_begin,
+                     OffsetIt offsets_end,
                      OutputIt outputs_begin,
                      cuda_stream_ref stream) const
 {
-  auto const num_keys = cuco::detail::distance(keys_begin, keys_end);
+  auto const num_keys = cuco::detail::distance(offsets_begin, offsets_end) - 1;
   if (num_keys == 0) { return; }
 
   auto const grid_size =
-    (num_keys + detail::CUCO_DEFAULT_STRIDE * detail::CUCO_DEFAULT_BLOCK_SIZE - 1) /
-    (detail::CUCO_DEFAULT_STRIDE * detail::CUCO_DEFAULT_BLOCK_SIZE);
+    (num_keys - 1) / (detail::CUCO_DEFAULT_STRIDE * detail::CUCO_DEFAULT_BLOCK_SIZE) + 1;
 
   trie_lookup_kernel<<<grid_size, detail::CUCO_DEFAULT_BLOCK_SIZE, 0, stream>>>(
     device_impl_, keys_begin, offsets_begin, outputs_begin, num_keys);
