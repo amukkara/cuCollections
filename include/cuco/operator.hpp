@@ -51,6 +51,12 @@ struct find_tag {
 struct bv_read_tag {
 } inline constexpr bv_read;
 
+/**
+ * @brief `trie_lookup` operator tag
+ */
+struct trie_lookup_tag {
+} inline constexpr trie_lookup;
+
 }  // namespace op
 }  // namespace experimental
 }  // namespace cuco

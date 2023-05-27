@@ -139,80 +139,33 @@ void trie<T>::lookup(KeyIt keys_begin,
   auto const grid_size =
     (num_keys - 1) / (detail::CUCO_DEFAULT_STRIDE * detail::CUCO_DEFAULT_BLOCK_SIZE) + 1;
 
+  auto ref_ = this->ref(cuco::experimental::trie_lookup);
+
   trie_lookup_kernel<<<grid_size, detail::CUCO_DEFAULT_BLOCK_SIZE, 0, stream>>>(
-    device_impl_, keys_begin, offsets_begin, outputs_begin, num_keys);
+    ref_, keys_begin, offsets_begin, outputs_begin, num_keys);
 }
 
-template <typename T, typename KeyIt, typename OffsetIt, typename OutputIt>
+template <typename TrieRef, typename KeyIt, typename OffsetIt, typename OutputIt>
 __global__ void trie_lookup_kernel(
-  const trie<T>* trie, KeyIt keys, OffsetIt offsets, OutputIt outputs, uint64_t num_keys)
+  TrieRef ref, KeyIt keys, OffsetIt offsets, OutputIt outputs, uint64_t num_keys)
 {
   uint32_t const loop_stride = gridDim.x * blockDim.x;
   uint32_t key_id            = blockDim.x * blockIdx.x + threadIdx.x;
 
   while (key_id < num_keys) {
+    const auto key        = keys + offsets[key_id];
     const uint64_t length = offsets[key_id + 1] - offsets[key_id];
-    const auto query      = keys + offsets[key_id];
-
-    uint32_t node_id = 0;
-    for (uint32_t cur_depth = 1; cur_depth <= length; cur_depth++) {
-      if (!binary_search_labels_array(trie, (T) * (query + cur_depth - 1), node_id, cur_depth)) {
-        outputs[key_id] = -1lu;
-        return;
-      }
-    }
-
-    uint64_t leaf_level_id = length;
-    if (!trie->d_outs_refs_ptr_[leaf_level_id].get(node_id)) {
-      outputs[key_id] = -1lu;
-      return;
-    }
-
-    auto offset     = trie->d_levels_ptr_[leaf_level_id].offset;
-    auto rank       = trie->d_outs_refs_ptr_[leaf_level_id].rank(node_id);
-    outputs[key_id] = offset + rank;
-
+    outputs[key_id]       = ref.lookup_key(key, length);
     key_id += loop_stride;
   }
 }
 
-template <typename BitVectorRef>
-__device__ uint32_t find_end_pos(BitVectorRef louds_ref, uint32_t& node_id)
-{
-  uint32_t node_pos = 0;
-  if (node_id != 0) {
-    node_pos = louds_ref.select(node_id - 1) + 1;
-    node_id  = node_pos - node_id;
-  }
-  uint32_t pos_end = louds_ref.find_next_set(node_pos);
-  uint32_t end     = node_id + (pos_end - node_pos);
-  return end;
-}
-
 template <typename T>
-__device__ bool binary_search_labels_array(const trie<T>* trie,
-                                           T target,
-                                           uint32_t& node_id,
-                                           uint32_t level_id)
+template <typename... Operators>
+auto trie<T>::ref(Operators...) const noexcept
 {
-  auto louds_ref = trie->d_louds_refs_ptr_[level_id];
-
-  uint32_t end   = find_end_pos(louds_ref, node_id);
-  uint32_t begin = node_id;  // Do not move this before find_end_pos call
-
-  const auto& level = trie->d_levels_ptr_[level_id];
-  while (begin < end) {
-    node_id    = (begin + end) / 2;
-    auto label = level.d_labels_ptr[node_id];
-    if (target < label) {
-      end = node_id;
-    } else if (target > label) {
-      begin = node_id + 1;
-    } else {
-      break;
-    }
-  }
-  return begin < end;
+  static_assert(sizeof...(Operators), "No operators specified");
+  return ref_type<Operators...>{device_impl_};
 }
 
 template <typename T>

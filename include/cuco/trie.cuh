@@ -17,6 +17,7 @@
 
 #include <cuco/bit_vector.cuh>
 #include <cuco/cuda_stream_ref.hpp>
+#include <cuco/trie_ref.cuh>
 
 #include <thrust/device_vector.h>
 
@@ -72,6 +73,13 @@ class trie {
 
   using storage_type     = detail::storage<Storage, value_type, extent_type, allocator_type>;
   using storage_ref_type = typename storage_type::ref_type;
+
+  template <typename... Operators>
+  using ref_type =
+    cuco::experimental::trie_ref<T, Operators...>;  ///< Non-owning container ref type
+
+  template <typename... Operators>
+  [[nodiscard]] auto ref(Operators... ops) const noexcept;
 
   bit_vector_ref<storage_ref_type, bv_read_tag>* d_louds_refs_ptr_;
   bit_vector_ref<storage_ref_type, bv_read_tag>* d_outs_refs_ptr_;
