@@ -26,6 +26,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+struct valid_key {
+  valid_key(uint64_t num_keys) : num_keys_(num_keys) {}
+  __host__ __device__ bool operator()(uint64_t x) const { return x < num_keys_; }
+  const uint64_t num_keys_;
+};
+
 template <typename KeyType>
 void generate_keys(thrust::host_vector<KeyType>& keys,
                    thrust::host_vector<uint64_t>& offsets,
@@ -97,9 +103,6 @@ TEST_CASE("Lookup test", "")
     trie.lookup(
       device_keys.begin(), device_offsets.begin(), device_offsets.end(), lookup_result.begin());
 
-    thrust::host_vector<uint64_t> host_lookup_result = lookup_result;
-    for (size_t key_id = 0; key_id < num_keys; key_id++) {
-      REQUIRE(host_lookup_result[key_id] < num_keys);
-    }
+    REQUIRE(cuco::test::all_of(lookup_result.begin(), lookup_result.end(), valid_key(num_keys)));
   }
 }
