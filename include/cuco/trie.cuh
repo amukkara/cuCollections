@@ -45,11 +45,9 @@ class trie {
               cuda_stream_ref stream = {}) const;
 
   uint64_t n_keys() const { return n_keys_; }
-  uint64_t memory_footprint() const { return footprint_; }
 
   struct level {
     level();
-    uint64_t memory_footprint() const;
 
     bit_vector<> louds;
     bit_vector<> outs;
@@ -90,7 +88,6 @@ class trie {
 
   uint64_t n_keys_;
   uint64_t n_nodes_;
-  uint64_t footprint_;
   std::vector<T> last_key_;
 
   trie<T>* device_impl_;

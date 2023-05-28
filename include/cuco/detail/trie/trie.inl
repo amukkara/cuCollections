@@ -27,7 +27,6 @@ trie<T>::trie()
     num_levels_(2),
     n_keys_(0),
     n_nodes_(1),
-    footprint_(0),
     last_key_(),
     device_impl_(nullptr)
 {
@@ -105,7 +104,6 @@ void trie<T>::build()
     level.outs.build();
     outs_refs.push_back(level.outs.ref(bv_read));
 
-    footprint_ += level.memory_footprint();
     level.d_labels_ptr = move_vector_to_device(level.labels, level.d_labels);
 
     offset += level.offset;
@@ -171,12 +169,6 @@ auto trie<T>::ref(Operators...) const noexcept
 template <typename T>
 trie<T>::level::level() : louds(), outs(), d_labels_ptr(nullptr), offset(0)
 {
-}
-
-template <typename T>
-uint64_t trie<T>::level::memory_footprint() const
-{
-  return louds.size() + outs.size() + sizeof(T) * labels.size();
 }
 
 }  // namespace experimental
