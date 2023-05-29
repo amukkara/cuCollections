@@ -28,7 +28,7 @@ trie<T>::trie()
     n_keys_(0),
     n_nodes_(1),
     last_key_(),
-    device_impl_(nullptr)
+    device_ptr_(nullptr)
 {
   levels_[0].louds.add(0);
   levels_[0].louds.add(1);
@@ -41,7 +41,7 @@ template <typename T>
 trie<T>::~trie() noexcept(false)
 {
   if (d_levels_ptr_) { CUCO_CUDA_TRY(cudaFree(d_levels_ptr_)); }
-  if (device_impl_) { CUCO_CUDA_TRY(cudaFree(device_impl_)); }
+  if (device_ptr_) { CUCO_CUDA_TRY(cudaFree(device_ptr_)); }
 }
 
 template <typename T>
@@ -119,8 +119,8 @@ void trie<T>::build()
   CUCO_CUDA_TRY(
     cudaMemcpy(d_levels_ptr_, &levels_[0], sizeof(level) * num_levels_, cudaMemcpyHostToDevice));
 
-  CUCO_CUDA_TRY(cudaMalloc(&device_impl_, sizeof(trie<T>)));
-  CUCO_CUDA_TRY(cudaMemcpy(device_impl_, this, sizeof(trie<T>), cudaMemcpyHostToDevice));
+  CUCO_CUDA_TRY(cudaMalloc(&device_ptr_, sizeof(trie<T>)));
+  CUCO_CUDA_TRY(cudaMemcpy(device_ptr_, this, sizeof(trie<T>), cudaMemcpyHostToDevice));
 }
 
 template <typename T>
@@ -163,7 +163,7 @@ template <typename... Operators>
 auto trie<T>::ref(Operators...) const noexcept
 {
   static_assert(sizeof...(Operators), "No operators specified");
-  return ref_type<Operators...>{device_impl_};
+  return ref_type<Operators...>{device_ptr_};
 }
 
 template <typename T>
