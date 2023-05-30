@@ -45,7 +45,7 @@ trie<T>::~trie() noexcept(false)
 }
 
 template <typename T>
-void trie<T>::add(const std::vector<T>& key)
+void trie<T>::insert(const std::vector<T>& key)
 {
   if (key == last_key_) { return; }
   assert(n_keys_ == 0 || key > last_key_);

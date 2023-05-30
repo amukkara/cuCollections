@@ -45,7 +45,7 @@ class trie {
    *
    * @param key Key to insert
    */
-  void add(const std::vector<T>& key);
+  void insert(const std::vector<T>& key);
 
   /**
    * @brief Build level-by-level trie indexes after inserting all keys

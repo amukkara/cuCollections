@@ -89,7 +89,7 @@ TEST_CASE("Lookup test", "")
     sort(all_keys.begin(), all_keys.end(), vectorKeyCompare());
 
     for (auto key : all_keys) {
-      trie.add(key);
+      trie.insert(key);
     }
   }
 
