@@ -30,10 +30,10 @@ trie<T>::trie()
     last_key_(),
     device_ptr_(nullptr)
 {
-  levels_[0].louds.add(0);
-  levels_[0].louds.add(1);
-  levels_[1].louds.add(1);
-  levels_[0].outs.add(0);
+  levels_[0].louds.append(0);
+  levels_[0].louds.append(1);
+  levels_[1].louds.append(1);
+  levels_[0].outs.append(0);
   levels_[0].labels.push_back(sizeof(T) == 1 ? ' ' : (T)-1);
 }
 
@@ -62,8 +62,8 @@ void trie<T>::add(const std::vector<T>& key)
     T byte      = key[i];
     if ((i == last_key_.size()) || (byte != level.labels.back())) {
       level.louds.set_last(0);
-      level.louds.add(1);
-      level.outs.add(0);
+      level.louds.append(1);
+      level.outs.append(0);
       level.labels.push_back(key[i]);
       ++n_nodes_;
       break;
@@ -71,13 +71,13 @@ void trie<T>::add(const std::vector<T>& key)
   }
   for (++i; i < key.size(); ++i) {
     auto& level = levels_[i + 1];
-    level.louds.add(0);
-    level.louds.add(1);
-    level.outs.add(0);
+    level.louds.append(0);
+    level.louds.append(1);
+    level.outs.append(0);
     level.labels.push_back(key[i]);
     ++n_nodes_;
   }
-  levels_[key.size() + 1].louds.add(1);
+  levels_[key.size() + 1].louds.append(1);
   ++levels_[key.size() + 1].offset;
   levels_[key.size()].outs.set_last(1);
   ++n_keys_;
