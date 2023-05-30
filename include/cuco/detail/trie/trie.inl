@@ -34,7 +34,7 @@ trie<T>::trie()
   levels_[0].louds.append(1);
   levels_[1].louds.append(1);
   levels_[0].outs.append(0);
-  levels_[0].labels.push_back(sizeof(T) == 1 ? ' ' : (T)-1);
+  levels_[0].labels.push_back(sizeof(T) == 1 ? ' ' : static_cast<T>(-1));
 }
 
 template <typename T>

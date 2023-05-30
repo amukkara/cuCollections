@@ -23,7 +23,7 @@ class operator_impl<op::trie_lookup_tag, trie_ref<T, Operators...>> {
 
     uint32_t node_id = 0;
     for (uint32_t cur_depth = 1; cur_depth <= length; cur_depth++) {
-      if (!binary_search_labels_array((T)key[cur_depth - 1], node_id, cur_depth)) { return -1lu; }
+      if (!binary_search_labels_array(key[cur_depth - 1], node_id, cur_depth)) { return -1lu; }
     }
 
     uint64_t leaf_level_id = length;
