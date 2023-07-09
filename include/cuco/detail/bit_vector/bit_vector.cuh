@@ -33,9 +33,9 @@ namespace experimental {
  * @brief Struct to store ranks of bits at 256-bit intervals
  */
 struct rank {
-  uint32_t abs_hi_;  ///< Upper 32 bits of base
-  uint8_t abs_lo_;   ///< Lower 8 bits of base
-  uint8_t rels_[3];  ///< Four offsets for 64-bit sub-intervals
+  uint32_t abs_hi_;              ///< Upper 32 bits of base
+  uint8_t abs_lo_;               ///< Lower 8 bits of base
+  std::array<uint8_t, 3> rels_;  ///< Offsets for 64-bit sub-intervals
 
   /**
    * @brief Gets base rank of current 256-bit interval
