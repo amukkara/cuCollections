@@ -1,4 +1,4 @@
-#include <cuco/detail/bit_vector/bit_vector.cuh>
+#include <cuco/detail/trie/bit_vector/bit_vector.cuh>
 
 namespace cuco {
 namespace experimental {

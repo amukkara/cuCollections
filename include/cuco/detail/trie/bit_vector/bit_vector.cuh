@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include <cuco/detail/bit_vector/bit_vector_ref.cuh>
+#include <cuco/detail/trie/bit_vector/bit_vector_ref.cuh>
 #include <cuco/extent.cuh>
 #include <cuco/storage.cuh>
 #include <cuco/utility/allocator.hpp>
@@ -195,5 +195,5 @@ class bit_vector {
 }  // namespace experimental
 }  // namespace cuco
 
-#include <cuco/detail/bit_vector/bit_vector.inl>
-#include <cuco/detail/bit_vector/bit_vector_ref.inl>
+#include <cuco/detail/trie/bit_vector/bit_vector.inl>
+#include <cuco/detail/trie/bit_vector/bit_vector_ref.inl>
