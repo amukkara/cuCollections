@@ -15,8 +15,8 @@
  * limitations under the License.
  */
 
-#include <cuco/bit_vector.cuh>
 #include <cuco/cuda_stream_ref.hpp>
+#include <cuco/detail/bit_vector/bit_vector.cuh>
 #include <cuco/trie_ref.cuh>
 
 #include <thrust/device_vector.h>

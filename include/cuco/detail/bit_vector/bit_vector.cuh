@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include <cuco/bit_vector_ref.cuh>
+#include <cuco/detail/bit_vector/bit_vector_ref.cuh>
 #include <cuco/extent.cuh>
 #include <cuco/storage.cuh>
 #include <cuco/utility/allocator.hpp>
