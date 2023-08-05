@@ -34,6 +34,7 @@ class operator_impl<op::trie_lookup_tag, trie_ref<T, Operators...>> {
     return offset + rank;
   }
 
+ private:
   template <typename BitVectorRef>
   [[nodiscard]] __device__ uint32_t find_end_pos(BitVectorRef louds_ref,
                                                  uint32_t& node_id) const noexcept
