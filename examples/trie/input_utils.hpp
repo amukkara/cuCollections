@@ -35,6 +35,10 @@ double get_seconds(high_resolution_clock::time_point begin)
 {
   return (double)duration_cast<seconds>(high_resolution_clock::now() - begin).count();
 }
+double get_milliseconds(high_resolution_clock::time_point begin)
+{
+  return (double)duration_cast<milliseconds>(high_resolution_clock::now() - begin).count();
+}
 
 vector<string> read_input_keys(const char* filename, uint32_t max_keys, uint32_t start_offset);
 

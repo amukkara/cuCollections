@@ -510,7 +510,7 @@ int main(void)
   using KeyType = uint32_t;
   cuco::experimental::trie<KeyType> trie;
 
-  for (auto key : read_dataset(1000 * 1000)) {
+  for (auto key : read_dataset(10 * 1000 * 1000)) {
     trie.insert(key);
   }
   trie.build();
@@ -523,10 +523,22 @@ int main(void)
   read_topk_keys_and_scores(topk_keys, topk_scores, num_topk_id, max_depth);
 
   PathEnumeration<KeyType> pe;
-  for (size_t topk_id = 0; topk_id < num_topk_id; topk_id++) {
+  for (size_t topk_id = 0; topk_id < num_topk_id; topk_id++) {  // warmup
     pe.find_paths(&trie, topk_keys[topk_id], topk_scores[topk_id], max_depth, max_paths, 0);
+  }
+  pe.sync_streams();
+
+  auto begin            = high_resolution_clock::now();
+  uint32_t topk_repeats = 10;
+  for (uint32_t repeat = 0; repeat < topk_repeats; repeat++) {
+    //#pragma omp parallel for num_threads(num_streams)
+    for (size_t topk_id = 0; topk_id < num_topk_id; topk_id++) {
+      pe.find_paths(&trie, topk_keys[topk_id], topk_scores[topk_id], max_depth, max_paths, 0);
+    }
     pe.sync_streams();
   }
+  uint32_t total_calls = topk_repeats * num_topk_id;
+  cout << "GPU find paths " << get_milliseconds(begin) / total_calls << " msec" << endl;
 
   return 0;
 }
