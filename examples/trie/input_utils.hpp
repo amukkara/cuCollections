@@ -21,7 +21,6 @@
 #include <cassert>
 #include <chrono>
 #include <cuco/detail/error.hpp>
-#include <execution>
 #include <fstream>
 #include <iostream>
 #include <numeric>
@@ -43,10 +42,9 @@ void preprocess_input_keys(vector<string>& keys);
 
 vector<vector<Key>> generate_split_keys(const vector<string>& keys);
 
-vector<vector<Key>> read_dataset()
+vector<vector<Key>> read_dataset(int max_keys_per_file)
 {
-  int start_offset      = 284580752;  // keys starting with 1040 begin at offset 284M
-  int max_keys_per_file = 100 * 1000;
+  int start_offset = 284580752;  // keys starting with 1040 begin at offset 284M
 
   // cout << "OMP threads " << omp_get_max_threads() << endl;
   vector<std::string> filenames{"dataset/bing/full.txt"};
@@ -99,7 +97,7 @@ void preprocess_input_keys(vector<string>& keys)
 {
   // auto begin = high_resolution_clock::now();
   // sort_input_keys(keys);
-  keys.erase(unique(execution::seq, keys.begin(), keys.end()), keys.end());
+  keys.erase(unique(keys.begin(), keys.end()), keys.end());
   // cout << "preprocess time " << get_seconds(begin) << " sec" << endl;
 }
 
@@ -133,7 +131,7 @@ void sort_input_keys(vector<string>& keys)
     }
     const unordered_map<string, vector<Key>>& split_keys;
   };
-  sort(execution::seq, keys.begin(), keys.end(), cmpFunc(split_keys));
+  sort(keys.begin(), keys.end(), cmpFunc(split_keys));
 }
 
 vector<vector<Key>> generate_split_keys(const vector<string>& keys)
@@ -164,13 +162,18 @@ vector<T> apply_permutation(const vector<T>& vec, const vector<std::size_t>& p)
   return sorted_vec;
 }
 
-void read_topk_keys_and_scores(vector<vector<vector<uint32_t>>>& keys,
-                               vector<vector<vector<float>>>& scores,
+void read_topk_keys_and_scores(vector<const uint32_t*>& keys_out,
+                               vector<const float*>& scores_out,
                                size_t num_topk_id,
                                size_t max_depth)
 {
   ifstream keys_file("dataset/bing/100-sev-b.txt");
   ifstream scores_file("dataset/bing/100-sev-a.txt");
+  assert(keys_file.is_open());
+  assert(scores_file.is_open());
+
+  vector<vector<vector<uint32_t>>> keys;
+  vector<vector<vector<float>>> scores;
 
   keys.resize(num_topk_id);
   scores.resize(num_topk_id);
@@ -207,5 +210,10 @@ void read_topk_keys_and_scores(vector<vector<vector<uint32_t>>>& keys,
       keys[topk_id][depth].resize(256);
       scores[topk_id][depth].resize(256);
     }
+  }
+
+  for (size_t topk_id = 0; topk_id < num_topk_id; topk_id++) {
+    keys_out.push_back(linearize_vector(keys[topk_id]));
+    scores_out.push_back(linearize_vector(scores[topk_id]));
   }
 }

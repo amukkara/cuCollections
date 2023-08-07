@@ -80,8 +80,8 @@ class trie {
    * @return Number of keys
    */
   uint64_t n_keys() const { return n_keys_; }
-
   uint64_t n_nodes() const { return n_nodes_; }
+  uint64_t num_levels() const { return num_levels_; }
 
   using value_type     = uint64_t;  ///< bit_vector value type
   using extent_type    = decltype(make_valid_extent<1, 1>(
@@ -111,6 +111,7 @@ class trie {
   template <typename... Operators>
   [[nodiscard]] auto ref(Operators... ops) const noexcept;
 
+  trie<T>* device_ptr_;  ///< Device-side copy of trie structure
   bit_vector_ref<storage_ref_type, bv_read_tag>*
     d_louds_refs_ptr_;  ///< Array of refs of louds bitvectors of each level
   bit_vector_ref<storage_ref_type, bv_read_tag>*
@@ -141,8 +142,6 @@ class trie {
   uint64_t n_keys_;          ///< Number of keys inserted into trie
   uint64_t n_nodes_;         ///< Number of nodes in trie
   std::vector<T> last_key_;  ///< Last key inserted into trie
-
-  trie<T>* device_ptr_;  ///< Device-side copy of trie structure
 
   thrust::device_vector<bit_vector_ref<storage_ref_type, bv_read_tag>> d_louds_refs_, d_outs_refs_;
 };

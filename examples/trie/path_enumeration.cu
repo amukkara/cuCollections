@@ -63,15 +63,10 @@ class PathEnumeration {
                   uint32_t max_depth,
                   uint32_t max_paths,
                   uint32_t stream_id);
-  void sync_streams()
-  {
-    for (auto& stream : streams) {
-      CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
-    }
-  }
+  void sync_streams();
 
  private:
-  uint64_t num_levels_;
+  uint32_t num_levels_;
 
   const uint32_t num_streams = 1;
   std::vector<cudaStream_t> streams;
@@ -89,11 +84,6 @@ class PathEnumeration {
 
   void** sort_paths_temp_storage;
   size_t sort_paths_temp_storage_bytes;
-
-  void* reverse_lookup_temp_storage;
-  size_t reverse_lookup_temp_storage_bytes;
-
-  uint32_t** cg_vars;
 
  private:
   void sort_paths(uint32_t stream_id) const;
@@ -115,7 +105,6 @@ PathEnumeration<T>::PathEnumeration()
   path_offsets = (uint32_t**)malloc(sizeof(uint32_t*) * num_streams);
 
   sort_paths_temp_storage = (void**)malloc(sizeof(void*) * num_streams);
-  cg_vars                 = (uint32_t**)malloc(sizeof(uint32_t*) * num_streams);
 
   sort_paths_temp_storage_bytes = 0;
   cub::DeviceRadixSort::SortPairsDescending(nullptr,
@@ -143,7 +132,6 @@ PathEnumeration<T>::PathEnumeration()
     CUCO_CUDA_TRY(cudaMalloc(&path_offsets[i], sizeof(uint32_t) * 1000));
 
     CUCO_CUDA_TRY(cudaMalloc(&sort_paths_temp_storage[i], sort_paths_temp_storage_bytes));
-    CUCO_CUDA_TRY(cudaMalloc(&cg_vars[i], sizeof(uint32_t) * 8));
   }
 }
 
@@ -160,7 +148,6 @@ PathEnumeration<T>::~PathEnumeration() noexcept(false)
     CUCO_CUDA_TRY(cudaFree(path_values[i]));
     CUCO_CUDA_TRY(cudaFree(path_offsets[i]));
     CUCO_CUDA_TRY(cudaFree(sort_paths_temp_storage[i]));
-    CUCO_CUDA_TRY(cudaFree(cg_vars[i]));
     CUCO_CUDA_TRY(cudaStreamDestroy(streams[i]));
   }
   free(frontiers);
@@ -170,26 +157,16 @@ PathEnumeration<T>::~PathEnumeration() noexcept(false)
   free(path_values);
   free(path_offsets);
   free(sort_paths_temp_storage);
-  free(cg_vars);
 
   CUCO_CUDA_TRY(cudaFree(num_paths_outs));
 }
 
 template <typename T>
-void PathEnumeration<T>::sort_paths(uint32_t stream_id) const
+void PathEnumeration<T>::sync_streams()
 {
-  auto& stream            = streams[stream_id];
-  auto temp_storage_bytes = sort_paths_temp_storage_bytes;
-  cub::DeviceRadixSort::SortPairsDescending(sort_paths_temp_storage[stream_id],
-                                            temp_storage_bytes,
-                                            score_buffers[stream_id],
-                                            score_buffers[num_streams + stream_id],
-                                            path_buffers[stream_id],
-                                            path_buffers[num_streams + stream_id],
-                                            MAX_PATH_BUFFER_SIZE,
-                                            0,
-                                            sizeof(float) * 8,
-                                            stream);
+  for (auto& stream : streams) {
+    CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
+  }
 }
 
 template <typename T>
@@ -216,9 +193,10 @@ void PathEnumeration<T>::find_paths(const cuco::experimental::trie<T>* trie,
   assert(stream_id < streams.size());
   auto& stream = streams[stream_id];
 
-  max_depth = min(num_levels_ - 1, (size_t)max_depth);
+  num_levels_ = trie->num_levels();
+  max_depth   = min(num_levels_ - 1, max_depth);
 
-  find_paths_kernel<<<1, FIND_PATH_BLOCK_SIZE, 0, stream>>>(trie,
+  find_paths_kernel<<<1, FIND_PATH_BLOCK_SIZE, 0, stream>>>(trie->device_ptr_,
                                                             keys,
                                                             scores,
                                                             frontiers[stream_id],
@@ -233,7 +211,7 @@ void PathEnumeration<T>::find_paths(const cuco::experimental::trie<T>* trie,
   sort_paths(stream_id);
   CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
 
-  generate_full_paths<<<1, min(max_paths, 1024), 0, stream>>>(trie,
+  generate_full_paths<<<1, min(max_paths, 1024), 0, stream>>>(trie->device_ptr_,
                                                               path_buffers[stream_id],
                                                               score_buffers[stream_id],
                                                               path_values[stream_id],
@@ -244,49 +222,7 @@ void PathEnumeration<T>::find_paths(const cuco::experimental::trie<T>* trie,
   if (CHECK_FIND_PATHS_RESULT) { check_result(stream_id, max_paths); }
 }
 
-template <typename T>
-void PathEnumeration<T>::check_result(uint32_t stream_id, uint32_t max_paths) const
-{
-  auto& stream = streams[stream_id];
-
-  uint32_t num_paths = 0;
-  cudaMemcpyAsync(
-    &num_paths, num_paths_outs + stream_id, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream);
-  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
-  std::cout << "Num paths " << num_paths << std::endl;
-
-  std::vector<Path> paths_out(max_paths);
-  std::vector<float> scores_out(max_paths);
-  cudaMemcpyAsync(&paths_out[0],
-                  path_buffers[num_streams + stream_id],
-                  sizeof(Path) * min(max_paths, MAX_PATH_BUFFER_SIZE),
-                  cudaMemcpyDeviceToHost,
-                  stream);
-  cudaMemcpyAsync(&scores_out[0],
-                  score_buffers[num_streams + stream_id],
-                  sizeof(float) * min(max_paths, MAX_PATH_BUFFER_SIZE),
-                  cudaMemcpyDeviceToHost,
-                  stream);
-
-  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
-
-  for (uint32_t path_id = 0; path_id < 5; path_id++) {
-    auto path = paths_out[path_id];
-    std::cout << "Path " << path_id << ": " << path.node_id << " @ " << path.level_id << " "
-              << scores_out[path_id] << std::endl;
-  }
-}
-
 __device__ float score_node(const uint32_t* keys, const float* scores, uint32_t label, bool& match);
-
-__device__ __forceinline__ float atomicMaxFloat(float* addr, float value)
-{
-  float old;
-  old = (value >= 0) ? __int_as_float(atomicMax((int*)addr, __float_as_int(value)))
-                     : __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
-
-  return old;
-}
 
 template <typename BV>
 __device__ uint32_t init_node_pos(const BV& louds, uint32_t& node_id)
@@ -458,6 +394,56 @@ __global__ void __launch_bounds__(FIND_PATH_BLOCK_SIZE, 1)
 }
 
 template <typename T>
+void PathEnumeration<T>::sort_paths(uint32_t stream_id) const
+{
+  auto& stream            = streams[stream_id];
+  auto temp_storage_bytes = sort_paths_temp_storage_bytes;
+  cub::DeviceRadixSort::SortPairsDescending(sort_paths_temp_storage[stream_id],
+                                            temp_storage_bytes,
+                                            score_buffers[stream_id],
+                                            score_buffers[num_streams + stream_id],
+                                            path_buffers[stream_id],
+                                            path_buffers[num_streams + stream_id],
+                                            MAX_PATH_BUFFER_SIZE,
+                                            0,
+                                            sizeof(float) * 8,
+                                            stream);
+}
+
+template <typename T>
+void PathEnumeration<T>::check_result(uint32_t stream_id, uint32_t max_paths) const
+{
+  auto& stream = streams[stream_id];
+
+  uint32_t num_paths = 0;
+  cudaMemcpyAsync(
+    &num_paths, num_paths_outs + stream_id, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream);
+  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
+  std::cout << "Num paths " << num_paths << std::endl;
+
+  std::vector<Path> paths_out(max_paths);
+  std::vector<float> scores_out(max_paths);
+  cudaMemcpyAsync(&paths_out[0],
+                  path_buffers[num_streams + stream_id],
+                  sizeof(Path) * min(max_paths, MAX_PATH_BUFFER_SIZE),
+                  cudaMemcpyDeviceToHost,
+                  stream);
+  cudaMemcpyAsync(&scores_out[0],
+                  score_buffers[num_streams + stream_id],
+                  sizeof(float) * min(max_paths, MAX_PATH_BUFFER_SIZE),
+                  cudaMemcpyDeviceToHost,
+                  stream);
+
+  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
+
+  for (uint32_t path_id = 0; path_id < 5; path_id++) {
+    auto path = paths_out[path_id];
+    std::cout << "Path " << path_id << ": " << path.node_id << " @ " << path.level_id << " "
+              << scores_out[path_id] << std::endl;
+  }
+}
+
+template <typename T>
 __device__ void backtrace_path(const cuco::experimental::trie<T>* t,
                                int32_t level_id,
                                uint32_t start_node_id,
@@ -524,29 +510,21 @@ int main(void)
   using KeyType = uint32_t;
   cuco::experimental::trie<KeyType> trie;
 
-  std::vector<std::vector<KeyType>> keys = read_dataset();
-  for (auto key : keys) {
+  for (auto key : read_dataset(1000 * 1000)) {
     trie.insert(key);
   }
   trie.build();
+
   std::cout << "#keys " << trie.n_keys() << "   "
             << "#nodes " << trie.n_nodes() << std::endl;
 
-  vector<vector<vector<uint32_t>>> topk_keys;
-  vector<vector<vector<float>>> topk_scores;
+  vector<const uint32_t*> topk_keys;
+  vector<const float*> topk_scores;
   read_topk_keys_and_scores(topk_keys, topk_scores, num_topk_id, max_depth);
-
-  vector<const uint32_t*> linearized_keys(num_topk_id, nullptr);
-  vector<const float*> linearized_scores(num_topk_id, nullptr);
-  for (size_t topk_id = 0; topk_id < min(num_topk_id, (uint32_t)topk_keys.size()); topk_id++) {
-    linearized_keys[topk_id]   = linearize_vector(topk_keys[topk_id]);
-    linearized_scores[topk_id] = linearize_vector(topk_scores[topk_id]);
-  }
 
   PathEnumeration<KeyType> pe;
   for (size_t topk_id = 0; topk_id < num_topk_id; topk_id++) {
-    pe.find_paths(
-      &trie, linearized_keys[topk_id], linearized_scores[topk_id], max_depth, max_paths, 0);
+    pe.find_paths(&trie, topk_keys[topk_id], topk_scores[topk_id], max_depth, max_paths, 0);
     pe.sync_streams();
   }
 
