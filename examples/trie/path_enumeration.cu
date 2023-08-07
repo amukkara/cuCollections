@@ -16,11 +16,10 @@
 
 #include "cub/block/block_run_length_decode.cuh"
 #include "cub/cub.cuh"
+#include "input_utils.hpp"
 #include <cuco/trie.cuh>
 #include <cuco/trie_ref.cuh>
 #include <limits>
-
-#include <thrust/host_vector.h>
 
 const uint32_t FIND_PATH_BLOCK_SIZE = 1024;
 
@@ -29,6 +28,10 @@ const uint32_t MAX_FRONTIER_SIZE    = 100 * 1000;
 
 const uint32_t TOPK_KEYS_PER_LEVEL = 256;
 const bool CHECK_FIND_PATHS_RESULT = false;
+
+const uint32_t num_topk_id = 100;
+const uint32_t max_depth   = 16;
+const uint32_t max_paths   = 100;
 
 struct Edge {
   uint32_t node_id;
@@ -51,18 +54,26 @@ struct State {
 template <typename T>
 class PathEnumeration {
  public:
+  PathEnumeration();
+  ~PathEnumeration() noexcept(false);
+
   void find_paths(const cuco::experimental::trie<T>* trie,
                   const uint32_t* keys,
                   const float* scores,
                   uint32_t max_depth,
                   uint32_t max_paths,
                   uint32_t stream_id);
-  void sync_streams();
+  void sync_streams()
+  {
+    for (auto& stream : streams) {
+      CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
+    }
+  }
 
  private:
   uint64_t num_levels_;
 
-  uint32_t num_streams;
+  const uint32_t num_streams = 1;
   std::vector<cudaStream_t> streams;
 
   State** frontiers;
@@ -84,19 +95,13 @@ class PathEnumeration {
 
   uint32_t** cg_vars;
 
-  // FIXME
-  // GPUTrieImpl<T>* device_impl_;
-
  private:
-  void initialize_find_path_buffers();
-  void destroy_find_path_buffers();
-
   void sort_paths(uint32_t stream_id) const;
-  void check_find_paths_result(uint32_t stream_id, uint32_t max_paths) const;
+  void check_result(uint32_t stream_id, uint32_t max_paths) const;
 };
 
 template <typename T>
-void PathEnumeration<T>::initialize_find_path_buffers()
+PathEnumeration<T>::PathEnumeration()
 {
   CUCO_CUDA_TRY(cudaMalloc(&num_paths_outs, sizeof(uint32_t) * num_streams));
 
@@ -122,7 +127,7 @@ void PathEnumeration<T>::initialize_find_path_buffers()
                                             MAX_PATH_BUFFER_SIZE);
 
   streams.resize(num_streams);
-  for (int i = 0; i < num_streams; i++) {
+  for (size_t i = 0; i < num_streams; i++) {
     CUCO_CUDA_TRY(cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking));
 
     CUCO_CUDA_TRY(cudaMalloc(&frontiers[i], sizeof(State) * MAX_FRONTIER_SIZE));
@@ -143,9 +148,9 @@ void PathEnumeration<T>::initialize_find_path_buffers()
 }
 
 template <typename T>
-void PathEnumeration<T>::destroy_find_path_buffers()
+PathEnumeration<T>::~PathEnumeration() noexcept(false)
 {
-  for (int i = 0; i < num_streams; i++) {
+  for (size_t i = 0; i < num_streams; i++) {
     CUCO_CUDA_TRY(cudaFree(frontiers[i]));
     CUCO_CUDA_TRY(cudaFree(next_frontiers[i]));
     CUCO_CUDA_TRY(cudaFree(path_buffers[2 * i]));
@@ -223,19 +228,24 @@ void PathEnumeration<T>::find_paths(const cuco::experimental::trie<T>* trie,
                                                             score_buffers[stream_id],
                                                             max_depth,
                                                             max_paths);
+  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
+
   sort_paths(stream_id);
+  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
+
   generate_full_paths<<<1, min(max_paths, 1024), 0, stream>>>(trie,
                                                               path_buffers[stream_id],
                                                               score_buffers[stream_id],
                                                               path_values[stream_id],
                                                               path_offsets[stream_id],
                                                               max_paths);
+  CUCO_CUDA_TRY(cudaStreamSynchronize(stream));
 
-  if (CHECK_FIND_PATHS_RESULT) { check_find_paths_result(stream_id, max_paths); }
+  if (CHECK_FIND_PATHS_RESULT) { check_result(stream_id, max_paths); }
 }
 
 template <typename T>
-void PathEnumeration<T>::check_find_paths_result(uint32_t stream_id, uint32_t max_paths) const
+void PathEnumeration<T>::check_result(uint32_t stream_id, uint32_t max_paths) const
 {
   auto& stream = streams[stream_id];
 
@@ -509,71 +519,36 @@ __device__ __forceinline__ float score_node(const uint32_t* keys,
   return match * val + (1 - match) * score_sentinel;
 }
 
-template <typename KeyType>
-void generate_keys(thrust::host_vector<KeyType>& keys,
-                   thrust::host_vector<uint64_t>& offsets,
-                   size_t num_keys,
-                   size_t max_key_value,
-                   size_t max_key_length)
-{
-  for (size_t key_id = 0; key_id < num_keys; key_id++) {
-    size_t cur_key_length = 1 + (std::rand() % max_key_length);
-    offsets.push_back(cur_key_length);
-    for (size_t pos = 0; pos < cur_key_length; pos++) {
-      keys.push_back(1 + (std::rand() % max_key_value));
-    }
-  }
-
-  // Add a dummy 0 to simplify subsequent scan
-  offsets.push_back(0);
-  thrust::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin());  // in-place scan
-}
-
 int main(void)
 {
   using KeyType = uint32_t;
   cuco::experimental::trie<KeyType> trie;
 
-  std::size_t num_keys = 64 * 1024;
-  thrust::host_vector<KeyType> keys;
-  thrust::host_vector<uint64_t> offsets;
+  std::vector<std::vector<KeyType>> keys = read_dataset();
+  for (auto key : keys) {
+    trie.insert(key);
+  }
+  trie.build();
+  std::cout << "#keys " << trie.n_keys() << "   "
+            << "#nodes " << trie.n_nodes() << std::endl;
 
-  generate_keys(keys, offsets, num_keys, 1000, 32);
+  vector<vector<vector<uint32_t>>> topk_keys;
+  vector<vector<vector<float>>> topk_scores;
+  read_topk_keys_and_scores(topk_keys, topk_scores, num_topk_id, max_depth);
 
-  {
-    std::vector<std::vector<KeyType>> all_keys;
-    for (size_t key_id = 0; key_id < num_keys; key_id++) {
-      std::vector<KeyType> cur_key;
-      for (size_t pos = offsets[key_id]; pos < offsets[key_id + 1]; pos++) {
-        cur_key.push_back(keys[pos]);
-      }
-      all_keys.push_back(cur_key);
-    }
-
-    struct vectorKeyCompare {
-      bool operator()(const std::vector<KeyType>& lhs, const std::vector<KeyType>& rhs)
-      {
-        for (size_t pos = 0; pos < min(lhs.size(), rhs.size()); pos++) {
-          if (lhs[pos] < rhs[pos]) {
-            return true;
-          } else if (lhs[pos] > rhs[pos]) {
-            return false;
-          }
-        }
-        return lhs.size() <= rhs.size();
-      }
-    };
-
-    sort(all_keys.begin(), all_keys.end(), vectorKeyCompare());
-
-    for (auto key : all_keys) {
-      trie.insert(key);
-    }
+  vector<const uint32_t*> linearized_keys(num_topk_id, nullptr);
+  vector<const float*> linearized_scores(num_topk_id, nullptr);
+  for (size_t topk_id = 0; topk_id < min(num_topk_id, (uint32_t)topk_keys.size()); topk_id++) {
+    linearized_keys[topk_id]   = linearize_vector(topk_keys[topk_id]);
+    linearized_scores[topk_id] = linearize_vector(topk_scores[topk_id]);
   }
 
-  trie.build();
-
   PathEnumeration<KeyType> pe;
-  pe.find_paths(&trie, nullptr, nullptr, 16, 100, 0);
+  for (size_t topk_id = 0; topk_id < num_topk_id; topk_id++) {
+    pe.find_paths(
+      &trie, linearized_keys[topk_id], linearized_scores[topk_id], max_depth, max_paths, 0);
+    pe.sync_streams();
+  }
+
   return 0;
 }

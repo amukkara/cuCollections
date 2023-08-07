@@ -81,6 +81,8 @@ class trie {
    */
   uint64_t n_keys() const { return n_keys_; }
 
+  uint64_t n_nodes() const { return n_nodes_; }
+
   using value_type     = uint64_t;  ///< bit_vector value type
   using extent_type    = decltype(make_valid_extent<1, 1>(
     std::declval<cuco::experimental::extent<std::size_t>>()));  ///< Extent type
